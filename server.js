@@ -51,14 +51,29 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // ✅ CORS Options with explicit headers and credentials
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
-  methods: "GET,POST,PUT,DELETE,OPTIONS",
-  allowedHeaders: "Content-Type, Authorization, x-selected-role",
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      process.env.FRONTEND_URL,
+      "http://localhost:3000"
+    ];
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "x-selected-role"
+  ],
   credentials: true,
 };
 
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions)); // allow preflight requests
+app.options("*", cors(corsOptions)); // <-- IMPORTANT for preflight
+
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
