@@ -1738,3 +1738,7 @@ app.put("/api/incidents/:id/update-customer", authenticateToken, async (req, res
 server.listen(PORT, () => {
   console.log(`✅ Server + Socket.IO running at http://localhost:${PORT}`);
 });
+
+app.get("/", (req, res) => {
+  res.send("✅ IT Helpdesk Backend is running");
+});
