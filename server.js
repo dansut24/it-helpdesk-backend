@@ -1,6 +1,6 @@
 require("dotenv").config();
 const express = require("express");
-const mysql = require("mysql");
+const { Pool } = require('pg');
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const authRoutes = require("./routes/auth");
@@ -82,12 +82,12 @@ app.use("/api/auth", authRoutes);
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.options("*", cors(corsOptions));
 
-const db = mysql.createConnection({
-  host: process.env.DATABASE_HOST,
-  user: process.env.DATABASE_USER,
-  password: process.env.DATABASE_PASSWORD,
-  database: process.env.DATABASE_NAME,
+const pool = new Pool({
+  connectionString: process.env.SUPABASE_DB_URL,
+  ssl: { rejectUnauthorized: false }
 });
+
+const query = (text, params) => pool.query(text, params);
 
 
 db.connect((err) => {
@@ -98,7 +98,7 @@ db.connect((err) => {
   console.log("✅ Connected to MySQL Database: it_helpdesk");
 });
 
-const query = util.promisify(db.query).bind(db);
+const query = util.promisify(await query).bind(db);
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
@@ -124,7 +124,7 @@ const logAuditAction = async (user, action, details) => {
     VALUES (?, ?, ?, ?, NOW())
   `;
   try {
-    await db.query(sql, [user.id, user.username, action, details]);
+    await await query(sql, [user.id, user.username, action, details]);
     console.log("✅ Audit log written:", action);
   } catch (err) {
     console.error("❌ Audit log error:", err.message);
@@ -145,7 +145,7 @@ app.get("/api/incidents/next-ref", async (req, res) => {
       FROM incidents
   `;
 
-  db.query(sql, (err, result) => {
+  await query(sql, (err, result) => {
     if (err) {
       console.error("❌ SQL Error:", err);
       return res.status(500).json({ error: "Internal Server Error" });
@@ -208,7 +208,7 @@ app.post("/api/users/avatar", authenticateToken, uploadAvatar.single("avatar"), 
   const userId = req.user.id;
 
   const sql = "UPDATE users SET avatar_url = ? WHERE id = ?";
-  db.query(sql, [avatarPath, userId], (err, result) => {
+  await query(sql, [avatarPath, userId], (err, result) => {
     if (err) {
       console.error("❌ Error updating avatar URL:", err);
       return res.status(500).json({ error: "Failed to update avatar" });
@@ -371,7 +371,7 @@ app.get("/api/incidents/:referenceNumber", authenticateToken, (req, res) => {
     GROUP BY i.id
   `;
 
-  db.query(sql, [referenceNumber], (err, result) => {
+  await query(sql, [referenceNumber], (err, result) => {
     if (err) {
       console.error("❌ Error fetching incident:", err);
       return res.status(500).json({ error: "Error fetching incident" });
@@ -712,7 +712,7 @@ app.get("/api/service-requests/:id", authenticateToken, (req, res) => {
   const { id } = req.params;
 
   const sql = "SELECT * FROM service_requests WHERE id = ?";
-  db.query(sql, [id], (err, results) => {
+  await query(sql, [id], (err, results) => {
     if (err) {
       console.error("❌ Error fetching service request:", err);
       return res.status(500).json({ error: "Internal server error" });
@@ -737,7 +737,7 @@ app.get("/api/service-requests/:id", authenticateToken, (req, res) => {
 
 // ✅ Changes API - Register Route
 app.get("/api/changes", (req, res) => {
-  db.query("SELECT * FROM changes ORDER BY createdAt DESC", (err, results) => {
+  await query("SELECT * FROM changes ORDER BY createdAt DESC", (err, results) => {
     if (err) {
       console.error("❌ Error fetching changes:", err);
       return res.status(500).json({ error: "Error fetching changes" });
@@ -768,7 +768,7 @@ app.post("/api/changes", authenticateToken, (req, res) => {
 `;
 
 
-  db.query(
+  await query(
     sql,
     [title, description, risk_level, requested_date, backoutPlan, testingPlan, justification],
     (err, result) => {
@@ -786,7 +786,7 @@ app.post("/api/changes", authenticateToken, (req, res) => {
 app.get("/api/changes/:id", (req, res) => {
   const { id } = req.params;
 
-  db.query("SELECT * FROM changes WHERE id = ?", [id], (err, results) => {
+  await query("SELECT * FROM changes WHERE id = ?", [id], (err, results) => {
     if (err) {
       console.error("❌ Error fetching change:", err);
       return res.status(500).json({ error: "Database error" });
@@ -805,7 +805,7 @@ app.put("/api/changes/:id/status", (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  db.query("UPDATE changes SET status = ? WHERE id = ?", [status, id], (err) => {
+  await query("UPDATE changes SET status = ? WHERE id = ?", [status, id], (err) => {
     if (err) {
       console.error("❌ Error updating change status:", err);
       return res.status(500).json({ error: "Failed to update change status" });
@@ -817,7 +817,7 @@ app.put("/api/changes/:id/status", (req, res) => {
 
 // ✅ GET all articles
 app.get("/api/kb-articles", authenticateToken, (req, res) => {
-  db.query("SELECT * FROM kb_articles ORDER BY created_at DESC", (err, results) => {
+  await query("SELECT * FROM kb_articles ORDER BY created_at DESC", (err, results) => {
     if (err) {
       console.error("❌ Error fetching KB articles:", err);
       return res.status(500).json({ error: "Failed to fetch articles" });
@@ -836,7 +836,7 @@ app.post("/api/kb-articles", authenticateToken, (req, res) => {
 
   if (id) {
     // Update
-    db.query(
+    await query(
       "UPDATE kb_articles SET title = ?, category = ?, content = ? WHERE id = ?",
       [title, category, content, id],
       (err) => {
@@ -849,7 +849,7 @@ app.post("/api/kb-articles", authenticateToken, (req, res) => {
     );
   } else {
     // Insert
-    db.query(
+    await query(
       "INSERT INTO kb_articles (title, category, content) VALUES (?, ?, ?)",
       [title, category, content],
       (err, result) => {
@@ -866,7 +866,7 @@ app.post("/api/kb-articles", authenticateToken, (req, res) => {
 // ✅ DELETE article
 app.delete("/api/kb-articles/:id", authenticateToken, (req, res) => {
   const { id } = req.params;
-  db.query("DELETE FROM kb_articles WHERE id = ?", [id], (err) => {
+  await query("DELETE FROM kb_articles WHERE id = ?", [id], (err) => {
     if (err) {
       console.error("❌ Error deleting KB article:", err);
       return res.status(500).json({ error: "Failed to delete article" });
@@ -902,7 +902,7 @@ app.post("/api/email-settings", authenticateToken, (req, res) => {
     WHERE id = 1
   `;
 
-  db.query(sql, [from_name, from_email], (err) => {
+  await query(sql, [from_name, from_email], (err) => {
     if (err) {
       console.error("❌ Failed to update email settings:", err);
       return res.status(500).json({ error: "Failed to update email settings" });
@@ -914,7 +914,7 @@ app.post("/api/email-settings", authenticateToken, (req, res) => {
 
 // ✅ GET SLA Settings
 app.get("/api/sla-settings", authenticateToken, (req, res) => {
-  db.query("SELECT * FROM sla_settings", (err, results) => {
+  await query("SELECT * FROM sla_settings", (err, results) => {
     if (err) {
       console.error("❌ Error fetching SLA settings:", err);
       return res.status(500).json({ error: "Failed to load SLA settings" });
@@ -929,7 +929,7 @@ app.post("/api/sla-settings", authenticateToken, (req, res) => {
 
   const updates = Object.entries(slaUpdates).map(([priority, hours]) => {
     return new Promise((resolve, reject) => {
-      db.query(
+      await query(
         "UPDATE sla_settings SET hours = ? WHERE priority = ?",
         [hours, priority],
         (err) => {
@@ -1014,7 +1014,7 @@ app.put("/api/users/:id/status", authenticateToken, (req, res) => {
   const { active } = req.body;
 
   const sql = "UPDATE users SET active = ? WHERE id = ?";
-  db.query(sql, [active ? 1 : 0, id], (err) => {
+  await query(sql, [active ? 1 : 0, id], (err) => {
     if (err) {
       console.error("❌ Failed to update status:", err);
       return res.status(500).json({ error: "Failed to update status" });
@@ -1045,7 +1045,7 @@ app.put("/api/users/:id/reset-password", authenticateToken, async (req, res) => 
 
 
 app.get("/api/audit-logs", authenticateToken, (req, res) => {
-  db.query("SELECT * FROM audit_logs ORDER BY timestamp DESC", (err, results) => {
+  await query("SELECT * FROM audit_logs ORDER BY timestamp DESC", (err, results) => {
     if (err) {
       console.error("❌ Failed to fetch audit logs:", err);
       return res.status(500).json({ error: "Failed to load audit logs" });
@@ -1081,7 +1081,7 @@ app.post("/api/system-settings", authenticateToken, (req, res) => {
     WHERE id = 1
   `;
 
-  db.query(sql, [system_name, timezone, date_format, maintenance_mode ? 1 : 0], (err) => {
+  await query(sql, [system_name, timezone, date_format, maintenance_mode ? 1 : 0], (err) => {
     if (err) {
       console.error("❌ Failed to update system settings:", err);
       return res.status(500).json({ error: "Failed to update system settings" });
@@ -1092,7 +1092,7 @@ app.post("/api/system-settings", authenticateToken, (req, res) => {
 });
 
 app.get("/api/roles", authenticateToken, (req, res) => {
-  db.query("SELECT * FROM roles", (err, results) => {
+  await query("SELECT * FROM roles", (err, results) => {
     if (err) {
       console.error("❌ Failed to fetch roles:", err);
       return res.status(500).json({ error: "Failed to load roles" });
@@ -1103,7 +1103,7 @@ app.get("/api/roles", authenticateToken, (req, res) => {
 
 
 app.get("/api/permissions", authenticateToken, (req, res) => {
-  db.query("SELECT * FROM permissions", (err, results) => {
+  await query("SELECT * FROM permissions", (err, results) => {
     if (err) {
       console.error("❌ Failed to fetch permissions:", err);
       return res.status(500).json({ error: "Failed to load permissions" });
@@ -1121,7 +1121,7 @@ app.get("/api/roles/:id/permissions", authenticateToken, (req, res) => {
     JOIN role_permissions rp ON rp.permission_id = p.id
     WHERE rp.role_id = ?
   `;
-  db.query(sql, [id], (err, results) => {
+  await query(sql, [id], (err, results) => {
     if (err) {
       console.error("❌ Failed to fetch role permissions:", err);
       return res.status(500).json({ error: "Failed to load role permissions" });
@@ -1138,7 +1138,7 @@ app.post("/api/roles/:id/permissions", authenticateToken, (req, res) => {
   const deleteSql = "DELETE FROM role_permissions WHERE role_id = ?";
   const insertSql = "INSERT INTO role_permissions (role_id, permission_id) VALUES ?";
 
-  db.query(deleteSql, [id], (err) => {
+  await query(deleteSql, [id], (err) => {
     if (err) {
       console.error("❌ Failed to clear old permissions:", err);
       return res.status(500).json({ error: "Failed to clear permissions" });
@@ -1149,7 +1149,7 @@ app.post("/api/roles/:id/permissions", authenticateToken, (req, res) => {
     }
 
     const values = permissionIds.map((pid) => [id, pid]);
-    db.query(insertSql, [values], (err) => {
+    await query(insertSql, [values], (err) => {
       if (err) {
         console.error("❌ Failed to insert new permissions:", err);
         return res.status(500).json({ error: "Failed to save permissions" });
@@ -1182,7 +1182,7 @@ app.post("/api/email-templates", authenticateToken, (req, res) => {
   }
 
   if (id) {
-    db.query(
+    await query(
       "UPDATE email_templates SET name = ?, subject = ?, body = ? WHERE id = ?",
       [name, subject, body, id],
       (err) => {
@@ -1194,7 +1194,7 @@ app.post("/api/email-templates", authenticateToken, (req, res) => {
       }
     );
   } else {
-    db.query(
+    await query(
       "INSERT INTO email_templates (name, subject, body) VALUES (?, ?, ?)",
       [name, subject, body],
       (err, result) => {
@@ -1211,7 +1211,7 @@ app.post("/api/email-templates", authenticateToken, (req, res) => {
 // ✅ DELETE email template
 app.delete("/api/email-templates/:id", authenticateToken, (req, res) => {
   const { id } = req.params;
-  db.query("DELETE FROM email_templates WHERE id = ?", [id], (err) => {
+  await query("DELETE FROM email_templates WHERE id = ?", [id], (err) => {
     if (err) {
       console.error("❌ Failed to delete template:", err);
       return res.status(500).json({ error: "Failed to delete template" });
@@ -1254,7 +1254,7 @@ app.put("/api/users/:id/team", authenticateToken, (req, res) => {
   const { team_id } = req.body;
 
   const sql = "UPDATE users SET team_id = ? WHERE id = ?";
-  db.query(sql, [team_id || null, id], (err) => {
+  await query(sql, [team_id || null, id], (err) => {
     if (err) {
       console.error("❌ Failed to assign team:", err);
       return res.status(500).json({ error: "Failed to assign team" });
@@ -1571,7 +1571,7 @@ app.post("/api/templates", authenticateToken, async (req, res) => {
       }
     }
 
-    const result = await db.query(
+    const result = await await query(
       "INSERT INTO service_request_templates (name, description, auto_tasks) VALUES (?, ?, ?)",
       [name, description || null, autoTasksJson]
     );
@@ -1590,7 +1590,7 @@ app.put('/api/templates/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { name, description, auto_tasks } = req.body;
   try {
-    await db.query(
+    await await query(
       'UPDATE service_request_templates SET name = ?, description = ?, auto_tasks = ? WHERE id = ?',
       [name, description, JSON.stringify(auto_tasks || []), id]
     );
